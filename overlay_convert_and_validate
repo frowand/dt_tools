@@ -1,0 +1,192 @@
+#! /bin/bash
+
+# Copyright 2016  Frank Rowand  frowand.list@gmail.com
+# Copyright 2017  Frank Rowand  frowand.list@gmail.com
+#
+# license: GPL V2
+# This file is subject to the terms and conditions of the GNU General Public
+# License v2.
+#
+# Convert overlay dts file from hand-coded expanded form to new syntactic
+# sugar form.  Wrapper around overlay_convert_raw to add some validation.
+
+
+#_______________________________________________________________________________
+
+
+function usage
+{
+echo ""                                                                      >&2
+echo "usage:"                                                                >&2
+echo "  `basename $0` -h | -help | --help"                                   >&2
+echo "  `basename $0` [options] OLD_DTS NEW_DTS"                             >&2
+echo ""                                                                      >&2
+echo "  Convert OLD_DTS from old overlay style to new overlay style"         >&2
+echo "  using syntactic sugar."                                              >&2
+echo ""                                                                      >&2
+echo "  Wrapper around overlay_convert_raw to add some validation."          >&2
+echo ""                                                                      >&2
+echo "  Options:"                                                            >&2
+echo "     -h               Synonym for --help"                              >&2
+echo "    --force           Try to produce output even if errors exist"      >&2
+echo "    --help            Print this message"                              >&2
+echo "    --no-indent-fix   remove extra leading tabs"                       >&2
+echo "    --overwrite       Overwrite NEW_DTS if it already exists"          >&2
+echo "    --verbose         Print more information"                          >&2
+echo ""                                                                      >&2
+echo "  The early patches to dtc to support overlays required 'fragment'"    >&2
+echo "  and '__overlay__' nodes in the .dts source.  Later patches to dtc"   >&2
+echo "  will not require these nodes (and may possibly disallow them)."      >&2
+echo "  The new overlay style is expected to be the preferrred form."        >&2
+echo ""                                                                      >&2
+echo "  Will not overwrite NEW_DTS if it already exists."                    >&2
+echo ""                                                                      >&2
+echo "  Exit status is:"                                                     >&2
+echo "    0 success"                                                         >&2
+echo "    1 general error"                                                   >&2
+echo "    2 NEW_DTS already exists"                                          >&2
+echo "    3 conversion ERROR"                                                >&2
+echo "    4 conversion WARNING"                                              >&2
+echo "    5 'dtc -@ -O dts OLD_DTS' is different than 'dtc -@ -O dts NEW_DTS'" >&2
+echo ""                                                                      >&2
+echo "    If a conversion WARNING occurs, a diff of OLD_DTS and NEW_DTS"     >&2
+echo "    will be attempted.  If the diff succeeds, the exit status will"    >&2
+echo "    be 4, else the exit status will be 5."                             >&2
+echo ""                                                                      >&2
+}
+
+
+unset force
+unset new_dts
+unset no_indent_fix
+unset old_dts
+unset overwrite
+unset verbose
+
+while [[ ($# -gt 0) ]] ; do
+
+	case $1 in
+
+		--force )
+			shift
+			force="--force"
+			;;
+
+		-h | -help | --help )
+			shift
+			help=1
+			;;
+
+		--no-indent-fix )
+			shift
+			no_indent_fix="--no-indent-fix"
+			;;
+
+		--overwrite )
+			shift
+			overwrite=1
+			;;
+
+		--verbose )
+			shift
+			verbose="--verbose"
+			;;
+
+		* )
+			if [[ "${old_dts}" != "" ]] ; then
+
+				if [[ "${new_dts}" != "" ]] ; then
+					echo ""                              >&2
+					echo "ERROR: too many arguments"     >&2
+					echo ""                              >&2
+					exit 1
+				fi
+
+				new_dts=$1
+				shift
+			else
+				old_dts=$1
+				shift
+			fi
+			;;
+
+		esac
+done
+
+
+if [[ (${help} == 1) ]] ; then
+	usage
+	exit 1
+fi
+
+
+#_______________________________________________________________________________
+
+if [[ -f ${new_dts} && overwrite -eq 0 ]] ; then
+
+	echo  ""                                                             >&2
+	echo  "ERROR: file '${new_dts}' already exists"                      >&2
+	echo  ""                                                             >&2
+
+	exit 2
+fi
+
+
+#_______________________________________________________________________________
+
+
+if which overlay_convert >/dev/null ; then
+	OVERLAY_CONVERT=overlay_convert
+elif which ./overlay_convert >/dev/null ; then
+	OVERLAY_CONVERT=./overlay_convert
+else
+	echo  ""                                                             >&2
+	echo "ERROR: overlay_convert not found or not executable"            >&2
+	echo  ""                                                             >&2
+
+	exit 1
+fi
+
+OVERLAY_CONVERT_OPTIONS="${force} ${no_indent_fix} ${verbose}"
+
+${OVERLAY_CONVERT} ${OVERLAY_CONVERT_OPTIONS} ${old_dts} > ${new_dts}
+
+convert_status=$?
+if [ ${convert_status} -ne 0 -a ${convert_status} -ne 3 ] ; then
+
+	echo ""                                                              >&2
+	echo "ERROR: unable to convert ${old_dts}"                           >&2
+	echo ""                                                              >&2
+
+	if [ "${force}" == "" ] ; then
+		rm ${new_dts}
+	fi
+
+	exit 3
+fi
+
+if ! which dtc >/dev/null ; then
+
+	echo  ""                                                             >&2
+	echo "ERROR: dtc not found or not executable"                        >&2
+	echo  "      add the location of dtc to \$PATH"                      >&2
+	echo  ""                                                             >&2
+
+	exit 1
+fi
+
+if ! diff -q                                    \
+	<(dtc -@ -O dts ${old_dts} 2>/dev/null) \
+	<(dtc -@ -O dts ${new_dts} 2>/dev/null) \
+	> /dev/null 2>/dev/null ; then
+
+	echo ""                                                              >&2
+	echo "ERROR: ${new_dts} is not equivalent to ${old_dts}"             >&2
+	echo ""                                                              >&2
+
+	exit 5
+fi
+
+if [ ${convert_status} -eq 3 ] ; then
+	exit 4
+fi
