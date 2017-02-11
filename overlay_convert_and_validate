@@ -30,7 +30,7 @@ echo "  Options:"                                                            >&2
 echo "     -h               Synonym for --help"                              >&2
 echo "    --force           Try to produce output even if errors exist"      >&2
 echo "    --help            Print this message"                              >&2
-echo "    --no-indent-fix   remove extra leading tabs"                       >&2
+echo "    --no-indent-fix   do not remove extra leading tabs"                >&2
 echo "    --overwrite       Overwrite NEW_DTS if it already exists"          >&2
 echo "    --verbose         Print more information"                          >&2
 echo ""                                                                      >&2
