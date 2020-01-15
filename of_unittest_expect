@@ -1,0 +1,306 @@
+#!/usr/bin/perl
+# SPDX-License-Identifier: GPL-2.0
+#
+# Copyright 2020 Sony Corporation
+#
+# Author: Frank Rowand
+
+
+$VUFX = "200114a";
+
+
+use strict 'refs';
+use strict subs;
+
+use Getopt::Long;
+use Text::Wrap;
+
+
+# strip off everything before final "/"
+(undef, $script_name) = split(/^.*\//, $0);
+
+
+#______________________________________________________________________________
+sub usage {
+
+# ***** when editing, be careful to not put tabs in the string printed:
+
+	print STDERR
+"
+
+usage:
+
+  $script_name CONSOLE_LOG
+
+     -h                print program usage
+    --help             print program usage
+    --hide-expect      suppress output of EXPECTed lines
+    --line-num         report line number of CONSOLE_LOG
+    --no-strip-ts      do not strip leading timestamp
+    --version          print program version and exit
+
+
+  Process a console log for EXPECTed test related messages to either
+  highlight expected devicetree unittest related messages or suppress
+  the messages.
+
+  Various unittests may trigger kernel messages from outside the
+  unittest code.  The unittest annotates any such message with
+  an EXPECT begin before triggering the message, and an EXPECT
+  end after triggering the message.
+
+  If an expected message does not occur, that will be reported.
+
+  If EXPECT begin and EXPECT end lines do not match, that will
+  be reported.  If nested, EXPECT end lines must be in the reverse
+  order of the corresponding EXPECT begin lines.
+
+  Default:
+    - strip timestamps
+
+  EXPECT begin and EXPECT end lines are suppressed.
+  Lines that match an EXPECT line are flagged with a leading 'ok'.
+  Lines reporting a $script_name warning or error are flagged with a leading '**'.
+  Lines reporting start or end of the unittests are flagged with a leading '->'.
+  Lines reporting a unittest test FAIL are flagged with a leading '>>'.
+
+  *** TODO:
+    
+	 - match '<<int>>' in EXPECT BEGIN/END to an integer value in CONSOLE_LOG.
+
+";
+
+	return {};
+}
+
+#______________________________________________________________________________
+#______________________________________________________________________________
+
+# save for usage()
+
+if (!GetOptions(
+	"h"               => \$help,
+	"help"            => \$help,
+	"hide-expect"     => \$hide_expect,
+	"line-num"        => \$print_line_num,
+	"no-strip-ts"     => \$no_strip_ts,
+	"verbose"         => \$verbose,
+	"version"         => \$version,
+	)) {
+	print STDERR "\n";
+	print STDERR "ERROR processing command line options\n";
+	print STDERR "\n";
+	print STDERR "For help, type '$script_name --help'\n";
+	print STDERR "\n";
+
+	exit 1;
+}
+
+
+if ($no_strip_ts) {
+	$strip_ts = 1;
+	$no_strip_ts = 0;
+} else {
+	$strip_ts = 0;
+	$no_strip_ts = 1;
+}
+
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+if ($help){
+
+	&usage;
+
+	exit 1;
+}
+
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+if ($version) {
+	print STDERR "\n$script_name  $VUFX\n\n";
+	print STDERR "\n";
+
+	exit 0;
+}
+
+
+#______________________________________________________________________________
+
+
+# $debug = 1;
+
+# zzz:
+#if ($#ARGV != 1) {
+#	print STDERR "\n";
+#	print STDERR "Required arguments: two file names\n";
+#	print STDERR "\n";
+#
+#	exit 0;
+#}
+
+
+# $exp_* are used as regex match patterns,
+# so '\\\\' in $exp_begin matches a single '\'
+
+$pr_fmt = "### dt-test ### ";
+$exp_begin = "${pr_fmt}EXPECT \\\\ : ";
+$exp_end   = "${pr_fmt}EXPECT / : ";
+
+
+# zzz print "begin >>$exp_begin<<\n";
+# zzz print "end   >>$exp_end<<\n";
+
+
+$line_num = "";
+$timestamp = "";
+
+LINE:
+while ($line = <ARGV>) {
+
+	chomp $line;
+
+	$prefix = "  ";
+
+
+	if ($strip_ts) {
+
+		$timestamp = $line;
+
+		if ($timestamp =~ /^\[\s*[0-9]+\.[0-9]*\] /) {
+			($timestamp, $null) = split(/]/, $line);
+			$timestamp = $timestamp . "] ";
+
+		} else {
+			$timestamp = "";
+		}
+	}
+
+	$line =~ s/^\[\s*[0-9]+\.[0-9]*\] //;
+
+	# zzz
+	# print ".. $line\n";
+
+
+	# -----  find EXPECT begin
+
+	if ($line =~ /^\s*$exp_begin/) {
+		$data = $line;
+		$data =~ s/^\s*$exp_begin//;
+		push @begin, $data;
+
+		if ($verbose) {
+			if ($print_line_num) {
+				$line_num = sprintf("%4s ", $.);
+			}
+			printf "%s %4s%s%s\n", $prefix, $line_num,  $timestamp, $line;
+		}
+
+		next LINE;
+	}
+
+
+	# -----  find EXPECT end
+
+	if ($line =~ /^\s*$exp_end/) {
+		$data = $line;
+		$data =~ s/^\s*$exp_end//;
+
+		if ($verbose) {
+			if ($print_line_num) {
+				$line_num = sprintf("%4s ", $.);
+			}
+			printf "%s %4s%s%s\n", $prefix, $line_num,  $timestamp, $line;
+		}
+
+		$found = 0;
+		$no_begin = 0;
+		if (@found_or_begin > 0) {
+			$begin = pop @found_or_begin;
+			if ($begin eq $data) {
+				$found = 1;
+			}
+		} elsif (@begin > 0) {
+			$begin = pop @begin;
+		} else {
+			$no_begin = 1;
+		}
+
+		if ($no_begin) {
+
+			print "** ERROR: EXPECT end without any EXPECT begin:\n";
+			print "       end ---> $line\n";
+
+		} elsif (! $found) {
+			if ($print_line_num) {
+				$line_num = sprintf("%4s ", $.);
+			}
+
+			printf "** %4s%s($script_name WARNING - not found ---> ) %s\n", $line_num,  $timestamp, $data;
+
+		} elsif ($begin ne $data) {
+			print "** ERROR: EXPECT end does not match EXPECT begin:\n";
+			print "       begin -> $begin\n";
+			print "       end ---> $line\n";
+		}
+
+		next LINE;
+	}
+
+
+	# -----  not an EXPECT line
+
+	if (($line =~ /^${pr_fmt}start of unittest - you will see error messages$/) ||
+	    ($line =~ /^${pr_fmt}end of unittest - [0-9]+ passed, [0-9]+ failed$/ )   ) {
+		$prefix = "->";
+	} elsif ($line =~ /^${pr_fmt}FAIL /) {
+		$prefix = ">>";
+	}
+
+	$found = 0;
+	foreach $begin (@begin) {
+		if ($line eq $begin) {
+			$found = 1;
+			last;
+		}
+	}
+
+	if ($found) {
+		$begin = shift @begin;
+		while ($begin ne $line) {
+			push @found_or_begin, $begin;
+			$begin = shift @begin;
+		}
+		push @found_or_begin, $line;
+
+		if ($hide_expect) {
+			$suppress_line = 1;
+			next LINE;
+		}
+		$prefix = "ok";
+	}
+
+
+	if ($print_line_num) {
+		$line_num = sprintf("%4s ", $.);
+	}
+
+	printf "%s %4s%s%s\n", $prefix, $line_num,  $timestamp, $line;
+}
+
+if (@begin) {
+	print "** ERROR: EXPECT begin without any EXPECT end:\n";
+	print "          This list may be misleading.\n";
+	foreach $begin (@begin) {
+		print "       begin ---> $begin\n";
+	}
+}
+
+
+#______________________________________________________________________________
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+#_______________________________________________________________________________
+# vi config follows:
+
+# ~/.exrc must contain "set modelines" for tabs to be set automatically
+# ex:set tabstop=3 shiftwidth=3 sts=0:
