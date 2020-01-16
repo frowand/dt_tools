@@ -6,7 +6,7 @@
 # Author: Frank Rowand
 
 
-$VUFX = "200114a";
+$VUFX = "200115a";
 
 
 use strict 'refs';
@@ -18,6 +18,63 @@ use Text::Wrap;
 
 # strip off everything before final "/"
 (undef, $script_name) = split(/^.*\//, $0);
+
+
+#______________________________________________________________________________
+sub compare {
+	my ($expect, $got) = @_;
+	my $expect_next;
+	my $expect_next_lit;
+	my $got_next;
+	my $type;
+
+	while ($expect) {
+
+		($expect_next, $type) = split(/<</, $expect);
+		($type) = split(/>>/, $type);
+		$expect =~ s/^.*?>>//;	# '?' is non-greedy, minimal match
+
+		# literal, ignore all metacharacters when used in a regex
+		$expect_next_lit = quotemeta($expect_next);
+
+		$got_next = $got;
+		$got_next =~ s/^($expect_next_lit).*/\1/;
+		$got       =~ s/^$expect_next_lit//;
+
+		if ($expect_next ne $got_next) {
+			return 0;
+		}
+
+		if ($type eq "int") {
+			if ($got =~ /^[+-]*[0-9]+/) {
+				$got =~ s/^[+-]*[0-9]+//;
+			} else {
+				return 0;
+			}
+		} elsif ($type eq "hex") {
+			if ($got =~ /^(0x)*[0-9a-f]+/) {
+				$got =~ s/^(0x)*[0-9a-f]+//;
+			} else {
+				return 0;
+			}
+		} elsif ($type eq "") {
+			if ($expect_next ne $got_next) {
+				return 0;
+			} else {
+				return 1;
+			}
+		} else {
+			print "ERROR: type not recognized: $type\n";
+			return 0;
+		}
+
+	}
+
+	# should not get here
+	print "ERROR: $script_name internal error, at end of compare()\n";
+
+	return 0;
+}
 
 
 #______________________________________________________________________________
@@ -55,18 +112,22 @@ usage:
   be reported.  If nested, EXPECT end lines must be in the reverse
   order of the corresponding EXPECT begin lines.
 
+  EXPECT begin and EXPECT end lines can contain special patterns:
+
+     <<int>> matches: [+-]*[0-9]+
+     <<hex>> matches: (0x)*[0-9a-f]+
+
   Default:
     - strip timestamps
 
   EXPECT begin and EXPECT end lines are suppressed.
   Lines that match an EXPECT line are flagged with a leading 'ok'.
-  Lines reporting a $script_name warning or error are flagged with a leading '**'.
-  Lines reporting start or end of the unittests are flagged with a leading '->'.
-  Lines reporting a unittest test FAIL are flagged with a leading '>>'.
-
-  *** TODO:
-    
-	 - match '<<int>>' in EXPECT BEGIN/END to an integer value in CONSOLE_LOG.
+  Lines reporting a $script_name warning or error are flagged
+     with a leading '**'.
+  Lines reporting start or end of the unittests are flagged
+     with a leading '->'.
+  Lines reporting a unittest test FAIL are flagged
+     with a leading '>>'.
 
 ";
 
@@ -148,10 +209,6 @@ $exp_begin = "${pr_fmt}EXPECT \\\\ : ";
 $exp_end   = "${pr_fmt}EXPECT / : ";
 
 
-# zzz print "begin >>$exp_begin<<\n";
-# zzz print "end   >>$exp_end<<\n";
-
-
 $line_num = "";
 $timestamp = "";
 
@@ -160,7 +217,7 @@ while ($line = <ARGV>) {
 
 	chomp $line;
 
-	$prefix = "  ";
+	$prefix = "  ";  ## 2 characters
 
 
 	if ($strip_ts) {
@@ -178,9 +235,6 @@ while ($line = <ARGV>) {
 
 	$line =~ s/^\[\s*[0-9]+\.[0-9]*\] //;
 
-	# zzz
-	# print ".. $line\n";
-
 
 	# -----  find EXPECT begin
 
@@ -193,7 +247,7 @@ while ($line = <ARGV>) {
 			if ($print_line_num) {
 				$line_num = sprintf("%4s ", $.);
 			}
-			printf "%s %4s%s%s\n", $prefix, $line_num,  $timestamp, $line;
+			printf "%s %s%s%s\n", $prefix, $line_num,  $timestamp, $line;
 		}
 
 		next LINE;
@@ -210,14 +264,14 @@ while ($line = <ARGV>) {
 			if ($print_line_num) {
 				$line_num = sprintf("%4s ", $.);
 			}
-			printf "%s %4s%s%s\n", $prefix, $line_num,  $timestamp, $line;
+			printf "%s %s%s%s\n", $prefix, $line_num,  $timestamp, $line;
 		}
 
 		$found = 0;
 		$no_begin = 0;
 		if (@found_or_begin > 0) {
 			$begin = pop @found_or_begin;
-			if ($begin eq $data) {
+			if (compare($data, $begin)) {
 				$found = 1;
 			}
 		} elsif (@begin > 0) {
@@ -236,9 +290,9 @@ while ($line = <ARGV>) {
 				$line_num = sprintf("%4s ", $.);
 			}
 
-			printf "** %4s%s($script_name WARNING - not found ---> ) %s\n", $line_num,  $timestamp, $data;
+			printf "** %s%s$script_name WARNING - not found ---> %s\n", $line_num,  $timestamp, $data;
 
-		} elsif ($begin ne $data) {
+		} elsif (! compare($data, $begin)) {
 			print "** ERROR: EXPECT end does not match EXPECT begin:\n";
 			print "       begin -> $begin\n";
 			print "       end ---> $line\n";
@@ -252,14 +306,14 @@ while ($line = <ARGV>) {
 
 	if (($line =~ /^${pr_fmt}start of unittest - you will see error messages$/) ||
 	    ($line =~ /^${pr_fmt}end of unittest - [0-9]+ passed, [0-9]+ failed$/ )   ) {
-		$prefix = "->";
+		$prefix = "->"; # 2 characters
 	} elsif ($line =~ /^${pr_fmt}FAIL /) {
-		$prefix = ">>";
+		$prefix = ">>"; # 2 characters
 	}
 
 	$found = 0;
 	foreach $begin (@begin) {
-		if ($line eq $begin) {
+		if (compare($begin, $line)) {
 			$found = 1;
 			last;
 		}
@@ -267,7 +321,7 @@ while ($line = <ARGV>) {
 
 	if ($found) {
 		$begin = shift @begin;
-		while ($begin ne $line) {
+		while (! compare($begin, $line)) {
 			push @found_or_begin, $begin;
 			$begin = shift @begin;
 		}
@@ -277,7 +331,7 @@ while ($line = <ARGV>) {
 			$suppress_line = 1;
 			next LINE;
 		}
-		$prefix = "ok";
+		$prefix = "ok"; # 2 characters
 	}
 
 
@@ -285,7 +339,7 @@ while ($line = <ARGV>) {
 		$line_num = sprintf("%4s ", $.);
 	}
 
-	printf "%s %4s%s%s\n", $prefix, $line_num,  $timestamp, $line;
+	printf "%s %s%s%s\n", $prefix, $line_num,  $timestamp, $line;
 }
 
 if (@begin) {
