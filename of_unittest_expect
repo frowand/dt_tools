@@ -5,6 +5,10 @@
 #
 # Author: Frank Rowand
 
+# This program is meant to be an aid to reading the output of the Linux
+# kernel devicetree unittest (drivers/of/unitest.c).  A design goal of
+# unittest is that the output is directly usable without a helper program
+# such as this one.
 
 $VUFX = "200115a";
 
