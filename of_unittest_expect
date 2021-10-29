@@ -10,7 +10,7 @@
 # unittest is that the output is directly usable without a helper program
 # such as this one.
 
-$VUFX = "200115a";
+$VUFX = "211028a";
 
 
 use strict 'refs';
@@ -97,6 +97,7 @@ usage:
     --help             print program usage
     --hide-expect      suppress output of EXPECTed lines
     --line-num         report line number of CONSOLE_LOG
+    --no-expect-stats  do not report EXPECT statistics
     --no-strip-ts      do not strip leading timestamp
     --version          print program version and exit
 
@@ -148,6 +149,7 @@ if (!GetOptions(
 	"help"            => \$help,
 	"hide-expect"     => \$hide_expect,
 	"line-num"        => \$print_line_num,
+	"no-expect-stats" => \$no_expect_stats,
 	"no-strip-ts"     => \$no_strip_ts,
 	"verbose"         => \$verbose,
 	"version"         => \$version,
@@ -207,6 +209,7 @@ if ($version) {
 
 # $exp_* are used as regex match patterns,
 # so '\\\\' in $exp_begin matches a single '\'
+# quotemeta() does not do the right thing in this case
 
 $pr_fmt = "### dt-test ### ";
 $exp_begin = "${pr_fmt}EXPECT \\\\ : ";
@@ -215,6 +218,11 @@ $exp_end   = "${pr_fmt}EXPECT / : ";
 
 $line_num = "";
 $timestamp = "";
+
+$expect_missing_begin = 0;
+$expect_missing_end   = 0;
+$expect_found         = 0;
+$expect_not_found     = 0;
 
 LINE:
 while ($line = <ARGV>) {
@@ -286,20 +294,31 @@ while ($line = <ARGV>) {
 
 		if ($no_begin) {
 
+			$expect_missing_begin++;
 			print "** ERROR: EXPECT end without any EXPECT begin:\n";
 			print "       end ---> $line\n";
 
 		} elsif (! $found) {
+
+			$expect_not_found++;
 			if ($print_line_num) {
 				$line_num = sprintf("%4s ", $.);
 			}
 
-			printf "** %s%s$script_name WARNING - not found ---> %s\n", $line_num,  $timestamp, $data;
+			printf "** %s%s$script_name WARNING - not found ---> %s\n",
+					$line_num,  $timestamp, $data;
 
 		} elsif (! compare($data, $begin)) {
+
+			$expect_missing_end++;
 			print "** ERROR: EXPECT end does not match EXPECT begin:\n";
 			print "       begin -> $begin\n";
 			print "       end ---> $line\n";
+
+		} else {
+
+			$expect_found++;
+
 		}
 
 		next LINE;
@@ -344,6 +363,16 @@ while ($line = <ARGV>) {
 	}
 
 	printf "%s %s%s%s\n", $prefix, $line_num,  $timestamp, $line;
+}
+
+if (! $no_expect_stats) {
+			print  "\n";
+			print  "** EXPECT statistics:\n";
+			print  "**\n";
+			printf "**   EXPECT found          : %4i\n", $expect_found;
+			printf "**   EXPECT not found      : %4i\n", $expect_not_found;
+			printf "**   missing EXPECT begin  : %4i\n", $expect_missing_begin;
+			printf "**   missing EXPECT end    : %4i\n", $expect_missing_end;
 }
 
 if (@begin) {
